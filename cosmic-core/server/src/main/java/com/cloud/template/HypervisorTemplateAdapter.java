@@ -17,6 +17,7 @@ import com.cloud.engine.subsystem.api.storage.DataStore;
 import com.cloud.engine.subsystem.api.storage.DataStoreManager;
 import com.cloud.engine.subsystem.api.storage.EndPoint;
 import com.cloud.engine.subsystem.api.storage.EndPointSelector;
+import com.cloud.engine.subsystem.api.storage.ObjectInDataStoreStateMachine;
 import com.cloud.engine.subsystem.api.storage.Scope;
 import com.cloud.engine.subsystem.api.storage.TemplateDataFactory;
 import com.cloud.engine.subsystem.api.storage.TemplateInfo;
@@ -38,6 +39,7 @@ import com.cloud.storage.ScopeType;
 import com.cloud.storage.Storage.ImageFormat;
 import com.cloud.storage.Storage.TemplateType;
 import com.cloud.storage.TemplateProfile;
+import com.cloud.storage.VMTemplateStorageResourceAssoc;
 import com.cloud.storage.VMTemplateStorageResourceAssoc.Status;
 import com.cloud.storage.VMTemplateVO;
 import com.cloud.storage.VMTemplateZoneVO;
@@ -60,6 +62,7 @@ import com.cloud.utils.exception.InvalidParameterValueException;
 
 import javax.inject.Inject;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
@@ -264,7 +267,49 @@ public class HypervisorTemplateAdapter extends TemplateAdapterBase {
             throw new InvalidParameterValueException("Failed to find a secondary storage in the specified zone.");
         }
 
+        // find all eligible image stores for this template
+        final List<DataStore> imageStores = templateMgr.getImageStoreByTemplate(template.getId(), profile.getZoneId());
+        if (imageStores == null || imageStores.size() == 0) {
+            // already destroyed on image stores
+            s_logger.info("Unable to find image store still having template: " + template.getName() + ", so just mark the template removed");
+        } else {
+            // Make sure the template is downloaded to all found image stores
+            for (final DataStore store : imageStores) {
+                final long storeId = store.getId();
+                final List<TemplateDataStoreVO> templateStores = _tmpltStoreDao.listByTemplateStore(template.getId(), storeId);
+                for (final TemplateDataStoreVO templateStore : templateStores) {
+                    if (cmd.getForced()) {
+                        forcefulDelete(template, store, templateStore);
+                    } else if (templateStore.getDownloadState() == Status.DOWNLOAD_IN_PROGRESS) {
+                        final String errorMsg = "Please specify a template that is not currently being downloaded or use forced parameter for force deletion.";
+                        s_logger.debug("Template: " + template.getName() + " is currently being downloaded to secondary storage host: " + store.getName() +
+                                "; can't delete it.");
+                        throw new CloudRuntimeException(errorMsg);
+                    }
+                }
+            }
+        }
         return profile;
+    }
+
+    private void forcefulDelete(final VMTemplateVO template, final DataStore store, final TemplateDataStoreVO templateStore) {
+        s_logger.debug("Template: " + template.getName() + " is currently being downloaded to secondary storage host: " + store.getName() +
+                "; forcefully deleting it because of forced flag passed.");
+        final TemplateDataStoreVO updateBuilder = _tmpltStoreDao.createForUpdate();
+        updateBuilder.setDownloadState(Status.DOWNLOAD_ERROR);
+        updateBuilder.setErrorString("Forcefully deleted by user");
+        updateBuilder.setDownloadPercent(0);
+        updateBuilder.setLastUpdated(new Date());
+        updateBuilder.setLocalDownloadPath("");
+        updateBuilder.setInstallPath("");
+        updateBuilder.setSize(0L);
+        updateBuilder.setPhysicalSize(0);
+        updateBuilder.setState(ObjectInDataStoreStateMachine.State.Failed);
+        _tmpltStoreDao.update(templateStore.getId(), updateBuilder);
+        // update size in vm_template table
+        final VMTemplateVO tmlptUpdater = _tmpltDao.createForUpdate();
+        tmlptUpdater.setSize(0L);
+        _tmpltDao.update(template.getId(), tmlptUpdater);
     }
 
     @Override
@@ -288,67 +333,50 @@ public class HypervisorTemplateAdapter extends TemplateAdapterBase {
 
         // find all eligible image stores for this template
         final List<DataStore> imageStores = templateMgr.getImageStoreByTemplate(template.getId(), profile.getZoneId());
-        if (imageStores == null || imageStores.size() == 0) {
-            // already destroyed on image stores
-            s_logger.info("Unable to find image store still having template: " + template.getName() + ", so just mark the template removed");
+
+        final String eventType;
+        if (template.getFormat().equals(ImageFormat.ISO)) {
+            eventType = EventTypes.EVENT_ISO_DELETE;
         } else {
-            // Make sure the template is downloaded to all found image stores
-            for (final DataStore store : imageStores) {
-                final long storeId = store.getId();
-                final List<TemplateDataStoreVO> templateStores = _tmpltStoreDao.listByTemplateStore(template.getId(), storeId);
-                for (final TemplateDataStoreVO templateStore : templateStores) {
-                    if (templateStore.getDownloadState() == Status.DOWNLOAD_IN_PROGRESS) {
-                        final String errorMsg = "Please specify a template that is not currently being downloaded.";
-                        s_logger.debug("Template: " + template.getName() + " is currently being downloaded to secondary storage host: " + store.getName() +
-                                "; cant' delete it.");
-                        throw new CloudRuntimeException(errorMsg);
-                    }
-                }
+            eventType = EventTypes.EVENT_TEMPLATE_DELETE;
+        }
+
+        for (final DataStore imageStore : imageStores) {
+            // publish zone-wide usage event
+            final Long sZoneId = ((ImageStoreEntity) imageStore).getDataCenterId();
+            if (sZoneId != null) {
+                UsageEventUtils.publishUsageEvent(eventType, template.getAccountId(), sZoneId, template.getId(), null, VirtualMachineTemplate.class.getName(), template
+                        .getUuid());
             }
 
-            final String eventType;
-            if (template.getFormat().equals(ImageFormat.ISO)) {
-                eventType = EventTypes.EVENT_ISO_DELETE;
-            } else {
-                eventType = EventTypes.EVENT_TEMPLATE_DELETE;
-            }
-
-            for (final DataStore imageStore : imageStores) {
-                // publish zone-wide usage event
-                final Long sZoneId = ((ImageStoreEntity) imageStore).getDataCenterId();
-                if (sZoneId != null) {
-                    UsageEventUtils.publishUsageEvent(eventType, template.getAccountId(), sZoneId, template.getId(), null, VirtualMachineTemplate.class.getName(), template
-                            .getUuid());
+            s_logger.info("Delete template from image store: " + imageStore.getName());
+            final AsyncCallFuture<TemplateApiResult> future = imageService.deleteTemplateAsync(imageFactory.getTemplate(template.getId(), imageStore));
+            try {
+                final TemplateApiResult result = future.get();
+                success = result.isSuccess();
+                if (!success) {
+                    s_logger.warn("Failed to delete the template " + template + " from the image store: " + imageStore.getName() + " due to: " + result.getResult());
+                    break;
                 }
 
-                s_logger.info("Delete template from image store: " + imageStore.getName());
-                final AsyncCallFuture<TemplateApiResult> future = imageService.deleteTemplateAsync(imageFactory.getTemplate(template.getId(), imageStore));
-                try {
-                    final TemplateApiResult result = future.get();
-                    success = result.isSuccess();
-                    if (!success) {
-                        s_logger.warn("Failed to delete the template " + template + " from the image store: " + imageStore.getName() + " due to: " + result.getResult());
-                        break;
+                // remove from template_zone_ref
+                final List<VMTemplateZoneVO> templateZones = templateZoneDao.listByZoneTemplate(sZoneId, template.getId());
+                if (templateZones != null) {
+                    for (final VMTemplateZoneVO templateZone : templateZones) {
+                        templateZoneDao.remove(templateZone.getId());
                     }
-
-                    // remove from template_zone_ref
-                    final List<VMTemplateZoneVO> templateZones = templateZoneDao.listByZoneTemplate(sZoneId, template.getId());
-                    if (templateZones != null) {
-                        for (final VMTemplateZoneVO templateZone : templateZones) {
-                            templateZoneDao.remove(templateZone.getId());
-                        }
-                    }
-                    //mark all the occurrences of this template in the given store as destroyed.
-                    templateDataStoreDao.removeByTemplateStore(template.getId(), imageStore.getId());
-                } catch (final InterruptedException e) {
-                    s_logger.debug("delete template Failed", e);
-                    throw new CloudRuntimeException("delete template Failed", e);
-                } catch (final ExecutionException e) {
-                    s_logger.debug("delete template Failed", e);
-                    throw new CloudRuntimeException("delete template Failed", e);
                 }
+                //mark all the occurrences of this template in the given store as destroyed.
+                templateDataStoreDao.removeByTemplateStore(template.getId(), imageStore.getId());
+            } catch (final InterruptedException e) {
+                s_logger.debug("delete template Failed", e);
+                throw new CloudRuntimeException("delete template Failed", e);
+            } catch (final ExecutionException e) {
+                s_logger.debug("delete template Failed", e);
+                throw new CloudRuntimeException("delete template Failed", e);
             }
         }
+
         if (success) {
             if ((imageStores.size() > 1) && (profile.getZoneId() != null)) {
                 //if template is stored in more than one image stores, and the zone id is not null, then don't delete other templates.

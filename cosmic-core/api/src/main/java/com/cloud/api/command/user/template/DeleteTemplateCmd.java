@@ -36,6 +36,9 @@ public class DeleteTemplateCmd extends BaseAsyncCmd {
     @Parameter(name = ApiConstants.ZONE_ID, type = CommandType.UUID, entityType = ZoneResponse.class, description = "the ID of zone of the template")
     private Long zoneId;
 
+    @Parameter(name = ApiConstants.FORCED, type = CommandType.BOOLEAN, required = false, description = "Force delete the template. Template might not be fully downloaded.")
+    private Boolean forced;
+
     /////////////////////////////////////////////////////
     /////////////////// Accessors ///////////////////////
     /////////////////////////////////////////////////////
@@ -74,6 +77,13 @@ public class DeleteTemplateCmd extends BaseAsyncCmd {
 
     public Long getId() {
         return id;
+    }
+
+    public Boolean getForced() {
+        if (forced == null) {
+            return false;
+        }
+        return forced;
     }
 
     @Override

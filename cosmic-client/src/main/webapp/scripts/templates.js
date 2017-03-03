@@ -2592,7 +2592,7 @@
         // "Delete Template"
         //if (((isUser() && jsonObj.ispublic == true && !(jsonObj.domainid == g_domainid && jsonObj.account == g_account)))
         if (((isAdmin() == false && !(jsonObj.domainid == g_domainid && jsonObj.account == g_account) && !(jsonObj.domainid == g_domainid && cloudStack.context.projects && jsonObj.projectid == cloudStack.context.projects[0].id))) //if neither root-admin, nor the same account, nor the same project
-            || (jsonObj.isready == false && jsonObj.status != null && jsonObj.status.indexOf("Downloaded") != -1) || (jsonObj.account == "system")) {
+            || (jsonObj.isready == false && jsonObj.status != null) || (jsonObj.account == "system")) {
             //do nothing
         } else {
             allowedActions.push("remove");
