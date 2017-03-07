@@ -1869,7 +1869,9 @@
                             label: 'label.network.name',
                             select: function (args) {
                                 $.ajax({
-                                    url: createURL("listNetworks"),
+                                    url: createURL('listNetworks', {
+                                        ignoreProject: ignoreProject
+                                    }),
                                     data: {
                                         zoneid: args.context.vpc[0].zoneid,
                                         domainid: args.context.vpc[0].domainid,

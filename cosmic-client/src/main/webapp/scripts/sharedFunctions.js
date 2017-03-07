@@ -397,7 +397,9 @@ var addPrivateNetworkDialog = {
                 array1.push("&cidr=" + args.data.ip4cidr);
 
             $.ajax({
-                url: createURL("createNetwork" + array1.join("")),
+                url: createURL("createNetwork" + array1.join(""), {
+                    ignoreProject: ignoreProject
+                }),
                 dataType: "json",
                 success: function (json) {
                     var item = json.createnetworkresponse.network;
