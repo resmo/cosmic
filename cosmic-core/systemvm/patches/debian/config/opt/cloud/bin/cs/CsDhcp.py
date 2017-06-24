@@ -25,6 +25,7 @@ class CsDhcp(CsDataBag):
         self.conf = CsFile(CLOUD_CONF)
 
         self.cloud.repopulate()
+        self.conf.repopulate()
         self.dhcp_opts.repopulate()
 
         for item in self.dbag:

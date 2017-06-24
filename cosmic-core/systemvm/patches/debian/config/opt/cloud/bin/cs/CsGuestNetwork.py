@@ -11,7 +11,12 @@ class CsGuestNetwork:
         dbag = db.getDataBag()
         self.config = config
         if device in dbag.keys() and len(dbag[device]) != 0:
-            self.data = dbag[device][0]
+            if len(dbag[device]) == 1:
+                self.data = dbag[device][0]
+            else:
+                for dev in dbag[device]:
+                    if dev['add']:
+                        self.data = dev
         else:
             self.guest = False
 
