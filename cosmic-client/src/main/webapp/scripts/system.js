@@ -13301,6 +13301,8 @@
             allowedActions.push("scaleUp");
 
             allowedActions.push("remove");
+        } else if (jsonObj.state == 'Paused') {
+            allowedActions.push("stop");
         }
         return allowedActions;
     }
