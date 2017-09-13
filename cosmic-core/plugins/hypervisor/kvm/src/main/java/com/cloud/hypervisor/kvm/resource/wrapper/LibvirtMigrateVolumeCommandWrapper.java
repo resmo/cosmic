@@ -41,14 +41,14 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             dm = conn.domainLookupByName(vmName);
 
             for (LibvirtDiskDef diskDef : disks) {
-                if (diskDef.getDiskPath().equals(command.getVolumePath())) {
+                if (diskDef.getDiskPath().contains(command.getVolumePath())) {
                     disk = diskDef;
                     break;
                 }
             }
 
             if (disk != null) {
-                disk.setDiskPath("");
+                disk.setDiskPath("/mnt/" + command.getPool().getUuid() + "/" + command.getVolumePath());
 
                 dm.blockCopy(command.getVolumePath(), disk.toString(), new DomainBlockCopyParameters(), 0, true);
             }
