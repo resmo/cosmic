@@ -209,6 +209,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
     // Start the Libvirt event loop
     static {
         try {
+            logger.debug("Starting Libvirt event loop");
             Library.initEventLoop();
         } catch (LibvirtException e) {
             throw new CloudRuntimeException(e);
@@ -223,6 +224,7 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
             }
         });
 
+        LIBVIRT_EVENT_LOOP.setName("Libvirt-Event-Loop");
         LIBVIRT_EVENT_LOOP.setDaemon(true);
         LIBVIRT_EVENT_LOOP.start();
     }

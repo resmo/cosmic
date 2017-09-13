@@ -8,7 +8,6 @@ import com.cloud.resource.CommandWrapper;
 import com.cloud.resource.ResourceWrapper;
 
 import java.util.List;
-import java.util.Optional;
 
 import org.libvirt.Connect;
 import org.libvirt.Domain;
@@ -28,7 +27,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
 
         final String vmName = command.getAttachedVmName();
 
-        LibvirtDiskDef disk;
+        LibvirtDiskDef disk = null;
         List<LibvirtDiskDef> disks;
 
         Domain dm = null;
@@ -41,13 +40,18 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             disks = libvirtComputingResource.getDisks(conn, vmName);
             dm = conn.domainLookupByName(vmName);
 
-            Optional<LibvirtDiskDef> diskDefOptional = disks.stream().filter(diskDef -> diskDef.getDiskPath().equals(command.getVolumePath())).findFirst();
+            for (LibvirtDiskDef diskDef : disks) {
+                if (diskDef.getDiskPath().equals(command.getVolumePath())) {
+                    disk = diskDef;
+                    break;
+                }
+            }
 
-            disk = diskDefOptional.orElseThrow(() -> new LibvirtException("No disk found with diskPath: " + command.getVolumePath()));
+            if (disk != null) {
+                disk.setDiskPath("");
 
-            disk.setDiskPath("");
-
-            dm.blockCopy(command.getVolumePath(), disk.toString(), new DomainBlockCopyParameters(), 0, true);
+                dm.blockCopy(command.getVolumePath(), disk.toString(), new DomainBlockCopyParameters(), 0, true);
+            }
         } catch (final LibvirtException e) {
             s_logger.debug("Can't migrate disk: " + e.getMessage());
             result = e.getMessage();
