@@ -154,6 +154,7 @@ import org.libvirt.DomainInfo;
 import org.libvirt.DomainInfo.DomainState;
 import org.libvirt.DomainInterfaceStats;
 import org.libvirt.DomainSnapshot;
+import org.libvirt.Library;
 import org.libvirt.LibvirtException;
 import org.libvirt.NodeInfo;
 import org.slf4j.Logger;
@@ -201,6 +202,29 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         s_powerStatesTable.put(DomainState.VIR_DOMAIN_BLOCKED, PowerState.PowerOn);
         s_powerStatesTable.put(DomainState.VIR_DOMAIN_NOSTATE, PowerState.PowerUnknown);
         s_powerStatesTable.put(DomainState.VIR_DOMAIN_SHUTDOWN, PowerState.PowerOff);
+    }
+
+    private static final Thread LIBVIRT_EVENT_LOOP;
+
+    // Start the Libvirt event loop
+    static {
+        try {
+            Library.initEventLoop();
+        } catch (LibvirtException e) {
+            throw new CloudRuntimeException(e);
+        }
+
+        LIBVIRT_EVENT_LOOP = new Thread(() -> {
+            try {
+                Library.runEventLoop();
+            } catch (LibvirtException e) {
+                throw new RuntimeException(e);
+            } catch (InterruptedException ignored) {
+            }
+        });
+
+        LIBVIRT_EVENT_LOOP.setDaemon(true);
+        LIBVIRT_EVENT_LOOP.start();
     }
 
     private final LibvirtComputingResourceProperties libvirtComputingResourceProperties = new LibvirtComputingResourceProperties();
@@ -1357,6 +1381,8 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         try {
             final Connect conn = LibvirtConnection.getConnection();
             conn.close();
+
+            Library.stopEventLoop();
         } catch (final LibvirtException e) {
             logger.trace("Ignoring libvirt error.", e);
         }
