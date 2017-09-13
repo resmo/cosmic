@@ -1,6 +1,7 @@
 package com.cloud.hypervisor.kvm.resource.wrapper;
 
 import com.cloud.agent.api.Answer;
+import com.cloud.agent.api.storage.MigrateVolumeAnswer;
 import com.cloud.agent.api.storage.MigrateVolumeCommand;
 import com.cloud.hypervisor.kvm.resource.LibvirtComputingResource;
 import com.cloud.hypervisor.kvm.resource.xml.LibvirtDiskDef;
@@ -34,6 +35,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
         Connect conn;
 
         String currentVolumePath;
+        String newVolumePath = null;
 
         try {
             final LibvirtUtilitiesHelper libvirtUtilitiesHelper = libvirtComputingResource.getLibvirtUtilitiesHelper();
@@ -41,6 +43,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             conn = libvirtUtilitiesHelper.getConnectionByVmName(vmName);
             disks = libvirtComputingResource.getDisks(conn, vmName);
             dm = conn.domainLookupByName(vmName);
+            newVolumePath = "/mnt/" + command.getPool().getUuid() + "/" + command.getVolumePath();
 
             for (LibvirtDiskDef diskDef : disks) {
                 if (diskDef.getDiskPath().contains(command.getVolumePath())) {
@@ -52,7 +55,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             if (disk != null) {
                 currentVolumePath = disk.getDiskPath();
 
-                disk.setDiskPath("/mnt/" + command.getPool().getUuid() + "/" + command.getVolumePath());
+                disk.setDiskPath(newVolumePath);
 
                 dm.blockCopy(currentVolumePath, disk.toString(), new DomainBlockCopyParameters(), 0, true);
             } else {
@@ -71,6 +74,6 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             }
         }
 
-        return new Answer(command, result == null, result);
+        return new MigrateVolumeAnswer(command, result == null, result, newVolumePath);
     }
 }
