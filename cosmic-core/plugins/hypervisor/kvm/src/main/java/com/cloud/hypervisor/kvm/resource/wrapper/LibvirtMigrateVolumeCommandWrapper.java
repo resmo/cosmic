@@ -33,6 +33,8 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
         Domain dm = null;
         Connect conn;
 
+        String currentVolumePath;
+
         try {
             final LibvirtUtilitiesHelper libvirtUtilitiesHelper = libvirtComputingResource.getLibvirtUtilitiesHelper();
 
@@ -48,9 +50,13 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             }
 
             if (disk != null) {
+                currentVolumePath = disk.getDiskPath();
+
                 disk.setDiskPath("/mnt/" + command.getPool().getUuid() + "/" + command.getVolumePath());
 
-                dm.blockCopy(command.getVolumePath(), disk.toString(), new DomainBlockCopyParameters(), 0, true);
+                dm.blockCopy(currentVolumePath, disk.toString(), new DomainBlockCopyParameters(), 0, true);
+            } else {
+                throw new LibvirtException("Couldn't find disk: " + command.getVolumePath() + " on vm: " + dm.getName());
             }
         } catch (final LibvirtException e) {
             s_logger.debug("Can't migrate disk: " + e.getMessage());
