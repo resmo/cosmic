@@ -36,10 +36,35 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
         List<LibvirtDiskDef> disks;
 
         Domain dm = null;
-        Connect conn;
+        Connect conn = null;
 
         String currentVolumePath;
         String newVolumePath;
+
+        CountDownLatch completeSignal = new CountDownLatch(1);
+
+        BlockJobListener blockJobListener = new BlockJobListener() {
+            @Override
+            public void onBlockJobCompleted(final Domain domain, final String disk, final int type) throws LibvirtException {
+                onBlockJobReady(domain, disk, type);
+            }
+
+            @Override
+            public void onBlockJobFailed(final Domain domain, final String disk, final int type) throws LibvirtException {
+                throw new LibvirtException("BlockJobFailed");
+            }
+
+            @Override
+            public void onBlockJobCanceled(final Domain domain, final String disk, final int type) throws LibvirtException {
+                throw new LibvirtException("BlockJobCanceled");
+            }
+
+            @Override
+            public void onBlockJobReady(final Domain domain, final String disk, final int type) throws LibvirtException {
+                domain.blockJobAbort(disk, DomainBlockJobAbortFlags.VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT);
+                completeSignal.countDown();
+            }
+        };
 
         try {
             final LibvirtUtilitiesHelper libvirtUtilitiesHelper = libvirtComputingResource.getLibvirtUtilitiesHelper();
@@ -56,30 +81,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
                 }
             }
 
-            CountDownLatch completeSignal = new CountDownLatch(1);
-
-            dm.addBlockJobListener(new BlockJobListener() {
-                @Override
-                public void onBlockJobCompleted(final Domain domain, final String disk, final int type) throws LibvirtException {
-                    onBlockJobReady(domain, disk, type);
-                }
-
-                @Override
-                public void onBlockJobFailed(final Domain domain, final String disk, final int type) throws LibvirtException {
-                    throw new LibvirtException("BlockJobFailed");
-                }
-
-                @Override
-                public void onBlockJobCanceled(final Domain domain, final String disk, final int type) throws LibvirtException {
-                    throw new LibvirtException("BlockJobCanceled");
-                }
-
-                @Override
-                public void onBlockJobReady(final Domain domain, final String disk, final int type) throws LibvirtException {
-                    domain.blockJobAbort(disk, DomainBlockJobAbortFlags.VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT);
-                    completeSignal.countDown();
-                }
-            });
+            dm.addBlockJobListener(blockJobListener);
 
             if (disk != null) {
                 currentVolumePath = disk.getDiskPath();
@@ -104,6 +106,11 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             try {
                 if (dm != null) {
                     dm.free();
+                }
+
+                // Stop block job listener
+                if (conn != null) {
+                    conn.removeBlockJobListener(blockJobListener);
                 }
             } catch (final LibvirtException e) {
                 s_logger.trace("Ignoring libvirt error.", e);
