@@ -9,10 +9,14 @@ import com.cloud.resource.CommandWrapper;
 import com.cloud.resource.ResourceWrapper;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
+import org.libvirt.StorageVol;
+import org.libvirt.event.BlockJobListener;
+import org.libvirt.flags.DomainBlockJobAbortFlags;
 import org.libvirt.parameters.DomainBlockCopyParameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +39,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
         Connect conn;
 
         String currentVolumePath;
-        String newVolumePath = null;
+        String newVolumePath;
 
         try {
             final LibvirtUtilitiesHelper libvirtUtilitiesHelper = libvirtComputingResource.getLibvirtUtilitiesHelper();
@@ -52,16 +56,48 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
                 }
             }
 
+            CountDownLatch completeSignal = new CountDownLatch(1);
+
+            dm.addBlockJobListener(new BlockJobListener() {
+                @Override
+                public void onBlockJobCompleted(final Domain domain, final String disk, final int type) throws LibvirtException {
+                    onBlockJobReady(domain, disk, type);
+                }
+
+                @Override
+                public void onBlockJobFailed(final Domain domain, final String disk, final int type) throws LibvirtException {
+                    throw new LibvirtException("BlockJobFailed");
+                }
+
+                @Override
+                public void onBlockJobCanceled(final Domain domain, final String disk, final int type) throws LibvirtException {
+                    throw new LibvirtException("BlockJobCanceled");
+                }
+
+                @Override
+                public void onBlockJobReady(final Domain domain, final String disk, final int type) throws LibvirtException {
+                    domain.blockJobAbort(disk, DomainBlockJobAbortFlags.VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT);
+                    completeSignal.countDown();
+                }
+            });
+
             if (disk != null) {
                 currentVolumePath = disk.getDiskPath();
 
                 disk.setDiskPath(newVolumePath);
 
-                dm.blockCopy(currentVolumePath, disk.toString(), new DomainBlockCopyParameters(), 0, true);
+                dm.blockCopy(currentVolumePath, disk.toString(), new DomainBlockCopyParameters(), 0);
             } else {
                 throw new LibvirtException("Couldn't find disk: " + command.getVolumePath() + " on vm: " + dm.getName());
             }
-        } catch (final LibvirtException e) {
+
+            // Wait for copy command to finish
+            completeSignal.await();
+
+            // Cleanup the old disk
+            StorageVol storageVol = conn.storageVolLookupByPath(currentVolumePath);
+            storageVol.delete(0);
+        } catch (final LibvirtException | InterruptedException e) {
             s_logger.debug("Can't migrate disk: " + e.getMessage());
             result = e.getMessage();
         } finally {
@@ -74,6 +110,6 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
             }
         }
 
-        return new MigrateVolumeAnswer(command, result == null, result, newVolumePath);
+        return new MigrateVolumeAnswer(command, result == null, result, command.getVolumePath());
     }
 }
