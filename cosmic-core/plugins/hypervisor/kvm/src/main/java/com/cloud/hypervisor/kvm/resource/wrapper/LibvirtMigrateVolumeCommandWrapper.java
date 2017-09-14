@@ -14,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import org.libvirt.Connect;
 import org.libvirt.Domain;
 import org.libvirt.LibvirtException;
+import org.libvirt.StoragePool;
 import org.libvirt.StorageVol;
 import org.libvirt.event.BlockJobListener;
 import org.libvirt.flags.DomainBlockJobAbortFlags;
@@ -95,6 +96,10 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
 
             // Wait for copy command to finish
             completeSignal.await();
+
+            // Refresh pool
+            StoragePool storagePool = conn.storagePoolLookupByUUIDString(command.getPool().getUuid());
+            storagePool.refresh(0);
 
             // Cleanup the old disk
             StorageVol storageVol = conn.storageVolLookupByPath(currentVolumePath);
