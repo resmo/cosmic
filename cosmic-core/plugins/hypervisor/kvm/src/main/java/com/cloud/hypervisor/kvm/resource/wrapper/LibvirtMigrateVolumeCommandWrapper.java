@@ -118,7 +118,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
                     conn.removeBlockJobListener(blockJobListener);
                 }
             } catch (final LibvirtException e) {
-                s_logger.trace("Ignoring libvirt error.", e);
+                s_logger.debug("Ignoring libvirt error.", e);
             }
         }
 
