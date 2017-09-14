@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 @ResourceWrapper(handles = MigrateVolumeCommand.class)
 public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<MigrateVolumeCommand, Answer, LibvirtComputingResource> {
 
-    private static final Logger s_logger = LoggerFactory.getLogger(LibvirtMigrateVolumeCommandWrapper.class);
+    private static final Logger logger = LoggerFactory.getLogger(LibvirtMigrateVolumeCommandWrapper.class);
 
     @Override
     public Answer execute(final MigrateVolumeCommand command, final LibvirtComputingResource libvirtComputingResource) {
@@ -82,6 +82,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
                 }
             }
 
+            logger.debug("Registering block job listener with libvirt for domain " + dm.getName());
             dm.addBlockJobListener(blockJobListener);
 
             if (disk != null) {
@@ -89,23 +90,24 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
 
                 disk.setDiskPath(newVolumePath);
 
+                logger.debug("Starting block copy for domain " + dm.getName() + " from " + currentVolumePath + " to " + newVolumePath);
                 dm.blockCopy(currentVolumePath, disk.toString(), new DomainBlockCopyParameters(), 0);
             } else {
                 throw new LibvirtException("Couldn't find disk: " + command.getVolumePath() + " on vm: " + dm.getName());
             }
 
-            // Wait for copy command to finish
+            logger.debug("Waiting for block copy for domain " + dm.getName() + " from " + currentVolumePath + " to " + newVolumePath + " to finish");
             completeSignal.await();
 
-            // Refresh pool
+            logger.debug("Refreshing storage pool " + command.getPool().getUuid());
             StoragePool storagePool = conn.storagePoolLookupByUUIDString(command.getPool().getUuid());
             storagePool.refresh(0);
 
-            // Cleanup the old disk
+            logger.debug("Cleaning up old disk " + currentVolumePath);
             StorageVol storageVol = conn.storageVolLookupByPath(currentVolumePath);
             storageVol.delete(0);
         } catch (final LibvirtException | InterruptedException e) {
-            s_logger.debug("Can't migrate disk: " + e.getMessage());
+            logger.debug("Can't migrate disk: " + e.getMessage());
             result = e.getMessage();
         } finally {
             try {
@@ -118,7 +120,7 @@ public final class LibvirtMigrateVolumeCommandWrapper extends CommandWrapper<Mig
                     conn.removeBlockJobListener(blockJobListener);
                 }
             } catch (final LibvirtException e) {
-                s_logger.debug("Ignoring libvirt error.", e);
+                logger.debug("Ignoring libvirt error.", e);
             }
         }
 
